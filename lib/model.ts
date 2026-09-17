@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { Provider } from "./providers";
 
 export const POLICY_VERSION = 1;
 export const ANALYSIS_VERSION = 2;
@@ -62,7 +63,7 @@ export type PageState = {
 export type Settings = {
   enabled: boolean;
   apiKey: string;
-  provider: "vercel";
+  provider: Provider;
   mode: "manual" | "auto";
 };
 export function shouldAutoAnalyze(

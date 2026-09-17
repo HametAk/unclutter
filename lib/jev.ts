@@ -1,11 +1,14 @@
 import { z } from "zod";
 import { categories, type Candidate, type Rule, type Snapshot } from "./model";
+import type { Provider } from "./providers";
 
 export const ENDPOINT = "https://ai-gateway.vercel.sh/v4/ai/evaluation-model";
+export const TYPESAFE_ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 const answerSchema = z.object({
   type: z.literal("choice"),
   choice: z.enum(categories),
   probabilities: z.partialRecord(z.enum(categories), z.number().finite().min(0).max(1)).optional(),
+  confidence: z.number().finite().min(0).max(1).optional(),
 });
 const responseSchema = z.object({ answers: z.record(z.string(), answerSchema) });
 
@@ -60,34 +63,59 @@ export function rulesFromAnswers(raw: unknown, candidates: Candidate[]): Rule[] 
     // Conservative operational cutoff, not a claim of calibrated accuracy.
     // If supplied, probabilities must support the selected choice.
     if (answer.probabilities && (answer.probabilities[answer.choice] ?? 0) < 0.9) return [];
+    if (answer.confidence !== undefined && answer.confidence < 0.9) return [];
     return [{ selector: candidate.selector, category: answer.choice, enabled: true }];
   });
 }
 
-export async function evaluate(snapshot: Snapshot, key: string): Promise<Rule[]> {
-  if (!snapshot.candidates.length) return [];
-  const response = await fetch(ENDPOINT, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-      "ai-gateway-protocol-version": "0.0.1",
-      "ai-gateway-auth-method": "api-key",
-      "ai-evaluation-model-specification-version": "4",
-      "ai-model-id": "typesafe-ai/jev",
+export function evaluationCall(
+  snapshot: Snapshot,
+  key: string,
+  provider: Provider = "vercel",
+): { url: string; init: RequestInit } {
+  const direct = provider === "typesafe";
+  const request = evaluationRequest(snapshot);
+  return {
+    url: direct ? TYPESAFE_ENDPOINT : ENDPOINT,
+    init: {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+        ...(direct
+          ? {}
+          : {
+              "ai-gateway-protocol-version": "0.0.1",
+              "ai-gateway-auth-method": "api-key",
+              "ai-evaluation-model-specification-version": "4",
+              "ai-model-id": "typesafe-ai/jev",
+            }),
+      },
+      body: JSON.stringify(direct ? { ...request, model: "jev-latest" } : request),
+      signal: AbortSignal.timeout(25_000),
     },
-    body: JSON.stringify(evaluationRequest(snapshot)),
-    signal: AbortSignal.timeout(25_000),
-  });
+  };
+}
+
+export async function evaluate(
+  snapshot: Snapshot,
+  key: string,
+  provider: Provider = "vercel",
+): Promise<Rule[]> {
+  if (!snapshot.candidates.length) return [];
+  const { url, init } = evaluationCall(snapshot, key, provider);
+  const response = await fetch(url, init);
   if (!response.ok) {
     const advice =
-      response.status === 401
-        ? "Check your Gateway API key."
-        : response.status === 403
-          ? "Check Gateway credits and model access."
-          : response.status === 429
-            ? "Rate limited. Try again later."
-            : "Try again later.";
+      provider === "typesafe" && (response.status === 401 || response.status === 403)
+        ? "Check your TypeSafe API key."
+        : response.status === 401
+          ? "Check your Gateway API key."
+          : response.status === 403
+            ? "Check Gateway credits and model access."
+            : response.status === 429
+              ? "Rate limited. Try again later."
+              : "Try again later.";
     throw new Error(`Jev request failed: HTTP ${response.status}. ${advice}`);
   }
   return rulesFromAnswers(await response.json(), snapshot.candidates);

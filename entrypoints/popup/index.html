@@ -24,9 +24,8 @@
         </select>
       </div>
       <p id="auto-disclosure" class="disclosure" hidden>
-        On page visit automatically sends element snippets to Vercel / TypeSafe AI for new
-        templates. Snippets may contain personal data. API charges apply. Cached templates are
-        reused.
+        On page visit automatically sends element snippets to Vercel AI Gateway for new templates.
+        Snippets may contain personal data. API charges apply. Cached templates are reused.
       </p>
       <section id="page" class="page-card">
         <div class="site-line">
@@ -42,7 +41,7 @@
           ><button id="toggle" class="secondary" hidden>Pause</button>
         </div>
         <p id="disclosure" class="disclosure">
-          Analyze sends up to 60 element descriptions to Vercel / TypeSafe AI. Main article text and
+          Analyze sends up to 60 element descriptions to Vercel AI Gateway. Main article text and
           form values are excluded; snippets may still contain personal data.
         </p>
       </section>
@@ -59,7 +58,7 @@
           <label for="provider">Provider</label
           ><select id="provider">
             <option value="vercel">Vercel AI Gateway</option>
-            <option value="typesafe" disabled>TypeSafe AI direct · WIP</option>
+            <option value="typesafe">TypeSafe AI</option>
           </select>
           <label for="api-key">API key</label>
           <div class="key-row">
@@ -68,7 +67,7 @@
               type="password"
               autocomplete="off"
               spellcheck="false"
-              placeholder="Paste Gateway key"
+              placeholder="Paste Vercel AI Gateway key"
             /><button type="submit" class="secondary">Save</button>
           </div>
           <p class="disclosure">

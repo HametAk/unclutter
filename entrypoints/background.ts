@@ -1,6 +1,7 @@
 import { browser } from "wxt/browser";
 import { z } from "zod";
 import { evaluate } from "../lib/jev";
+import { providers, providerKeyLabel, resolveProvider } from "../lib/providers";
 import {
   contextSchema,
   POLICY_VERSION,
@@ -19,7 +20,12 @@ import {
 
 const uiMessage = z.discriminatedUnion("type", [
   z.object({ type: z.literal("settings") }),
-  z.object({ type: z.literal("saveKey"), key: z.string().trim().min(1).max(1000) }),
+  z.object({
+    type: z.literal("saveKey"),
+    key: z.string().trim().min(1).max(1000),
+    provider: z.enum(providers),
+  }),
+  z.object({ type: z.literal("provider"), provider: z.enum(providers) }),
   z.object({ type: z.literal("removeKey") }),
   z.object({ type: z.literal("global"), enabled: z.boolean() }),
   z.object({ type: z.literal("mode"), mode: z.enum(["manual", "auto"]) }),
@@ -55,11 +61,11 @@ export default defineBackground(() => {
     .setAccessLevel?.({ accessLevel: "TRUSTED_CONTEXTS" })
     .catch(() => undefined);
   const settings = async (): Promise<Settings> => {
-    const data = await browser.storage.local.get(["enabled", "apiKey", "mode"]);
+    const data = await browser.storage.local.get(["enabled", "apiKey", "mode", "provider"]);
     return {
       enabled: data.enabled !== false,
       apiKey: typeof data.apiKey === "string" ? data.apiKey : "",
-      provider: "vercel",
+      provider: resolveProvider(data.provider),
       mode: data.mode === "auto" ? "auto" : "manual",
     };
   };
@@ -125,7 +131,8 @@ export default defineBackground(() => {
       const before = await profile(snapshot.context);
       const attempt = (await browser.storage.local.get(attemptKey))[attemptKey];
       if (automatic && !shouldAutoAnalyze(config, before, !!attempt)) return;
-      if (!config.apiKey) throw new Error("Add your Vercel AI Gateway API key first.");
+      if (!config.apiKey)
+        throw new Error(`Add your ${providerKeyLabel(config.provider)} API key first.`);
       if (!config.enabled) throw new Error("Enable Unclutter before analyzing.");
       tabJobs.add(tabId);
       tabErrors.delete(tabId);
@@ -133,7 +140,7 @@ export default defineBackground(() => {
       // must not create a retry loop across navigation or another tab.
       await browser.storage.local.set({ [attemptKey]: { startedAt: Date.now(), error: null } });
       await badge(tabId);
-      const rules = await evaluate(snapshot, config.apiKey);
+      const rules = await evaluate(snapshot, config.apiKey, config.provider);
       const latestConfig = await settings();
       if (!latestConfig.enabled || (automatic && latestConfig.mode !== "auto")) return;
       const current = snapshotSchema.parse(await send<Snapshot>(tabId, "snapshot"));
@@ -230,7 +237,11 @@ export default defineBackground(() => {
         };
       }
       if (message.type === "saveKey") {
-        await browser.storage.local.set({ apiKey: message.key });
+        await browser.storage.local.set({ apiKey: message.key, provider: message.provider });
+        return null;
+      }
+      if (message.type === "provider") {
+        await browser.storage.local.set({ provider: message.provider });
         return null;
       }
       if (message.type === "removeKey") {

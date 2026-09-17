@@ -1,5 +1,11 @@
 import { browser } from "wxt/browser";
 import { ANALYSIS_VERSION, unwrap, type PageState, type Reply } from "../../lib/model";
+import {
+  providerLabel,
+  providerKeyLabel,
+  resolveProvider,
+  type Provider,
+} from "../../lib/providers";
 import "./style.css";
 
 const get = <T extends HTMLElement>(id: string) => {
@@ -11,10 +17,12 @@ const analyze = get<HTMLButtonElement>("analyze");
 const toggle = get<HTMLButtonElement>("toggle");
 const global = get<HTMLInputElement>("global");
 const mode = get<HTMLSelectElement>("analysis-mode");
+const provider = get<HTMLSelectElement>("provider");
 const errorBox = get("error");
 let tabId: number | undefined;
 let hasKey = false;
 let working = false;
+let savedProvider: Provider = "vercel";
 let current: (PageState & { busy: boolean; error: string | null }) | null = null;
 let poll: ReturnType<typeof setTimeout> | undefined;
 
@@ -37,7 +45,16 @@ function render() {
   toggle.hidden = !current?.profile;
   toggle.disabled = !!busy || !global.checked;
   toggle.textContent = current?.profile?.enabled ? "Pause" : "Resume";
-  get("key-status").textContent = hasKey ? "Vercel · Key saved" : "API key required";
+  const selectedProvider = resolveProvider(provider.value);
+  provider.disabled = working;
+  get<HTMLInputElement>("api-key").placeholder = `Paste ${providerKeyLabel(selectedProvider)} key`;
+  get("key-status").textContent = hasKey
+    ? `${selectedProvider === "typesafe" ? "TypeSafe" : "Vercel"} · Key saved`
+    : "API key required";
+  get("disclosure").textContent =
+    `Analyze sends up to 60 element descriptions to ${providerLabel(selectedProvider)}. Main article text and form values are excluded; snippets may still contain personal data.`;
+  get("auto-disclosure").textContent =
+    `On page visit automatically sends element snippets to ${providerLabel(selectedProvider)} for new templates. Snippets may contain personal data. API charges apply. Cached templates are reused.`;
   get("remove-key").hidden = !hasKey;
   get("disclosure").hidden = !current || mode.value === "auto";
   get("auto-disclosure").hidden = mode.value !== "auto";
@@ -101,12 +118,19 @@ function render() {
   }
 }
 async function load() {
-  const config = await request<{ enabled: boolean; hasKey: boolean; mode: "manual" | "auto" }>({
+  const config = await request<{
+    enabled: boolean;
+    hasKey: boolean;
+    mode: "manual" | "auto";
+    provider: Provider;
+  }>({
     type: "settings",
   });
   hasKey = config.hasKey;
   global.checked = config.enabled;
   mode.value = config.mode;
+  savedProvider = resolveProvider(config.provider);
+  provider.value = savedProvider;
   if (tabId !== undefined) {
     try {
       current = await request({ type: "status", tabId });
@@ -141,6 +165,7 @@ async function act(message: object) {
     await request(message);
     await load();
   } catch (err) {
+    provider.value = savedProvider;
     error(err);
   } finally {
     working = false;
@@ -155,6 +180,10 @@ toggle.addEventListener(
 );
 global.addEventListener("change", () => void act({ type: "global", enabled: global.checked }));
 mode.addEventListener("change", () => void act({ type: "mode", mode: mode.value }));
+provider.addEventListener(
+  "change",
+  () => void act({ type: "provider", provider: resolveProvider(provider.value) }),
+);
 get("forget").addEventListener("click", () => void act({ type: "forget", tabId }));
 get("remove-key").addEventListener("click", () => void act({ type: "removeKey" }));
 get("key-form").addEventListener("submit", (event) => {
@@ -162,11 +191,11 @@ get("key-form").addEventListener("submit", (event) => {
   const input = get<HTMLInputElement>("api-key");
   const key = input.value.trim();
   if (!key) {
-    error(new Error("Enter a Vercel AI Gateway API key."));
+    error(new Error(`Enter a ${providerKeyLabel(resolveProvider(provider.value))} API key.`));
     return;
   }
   void (async () => {
-    await act({ type: "saveKey", key });
+    await act({ type: "saveKey", key, provider: resolveProvider(provider.value) });
     input.value = "";
     if (errorBox.hidden) {
       get<HTMLDetailsElement>("connection").open = false;
