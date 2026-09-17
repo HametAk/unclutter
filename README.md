@@ -2,20 +2,29 @@
 
 WXT extension for Chrome / Chromium and Firefox. Jev classifies nonessential page elements through Vercel AI Gateway; the extension stores and reapplies local hiding rules by page template.
 
-## Load on MacBook Pro
+## Install from source
 
-1. Open `chrome://extensions`.
+Requires [Bun](https://bun.sh) and Node.js 22.12 or newer.
+
+```sh
+git clone https://github.com/kitze/unclutter.git
+cd unclutter
+bun install --frozen-lockfile
+bun run build
+```
+
+1. Open `chrome://extensions` (or your Chromium browser's extensions page).
 2. Turn on **Developer mode**.
-3. Click **Load unpacked** and select `~/Downloads/Unclutter/chrome-mv3`.
+3. Click **Load unpacked** and select `.output/chrome-mv3` inside the cloned repository.
 4. Pin Unclutter, refresh any already-open website, then open its popup.
 5. Under **Connection**, paste your **Vercel AI Gateway API key** and save it.
 6. Choose **Manual** (default) and click **Analyze page**, or select **On page visit**. Gateway credits / Jev access are required.
 
 After replacing unpacked builds, click **Reload** on the extension card and refresh website tabs. Existing keys/settings stay in place. V1 templates show **Update available**; **Re-analyze** once to include cookie dialogs, or automatic mode upgrades them once while preserving paused templates and keep-visible choices.
 
-For Firefox, open `about:debugging#/runtime/this-firefox`, choose **Load Temporary Add-on**, and select `firefox-mv2/manifest.json`. Temporary add-ons disappear on Firefox restart; permanent Firefox distribution requires Mozilla signing. Chrome/Edge/Brave can use the Chromium build. Safari packaging is not included.
+For Firefox 140+, run `bun run build:firefox`, open `about:debugging#/runtime/this-firefox`, choose **Load Temporary Add-on**, and select `.output/firefox-mv2/manifest.json`. Temporary add-ons disappear on Firefox restart; permanent Firefox distribution requires Mozilla signing. Chrome/Edge/Brave can use the Chromium build. Safari packaging is not included.
 
-TypeSafe AI direct is shown as **WIP** and cannot be selected. No key is bundled.
+Bring your own [Vercel AI Gateway](https://vercel.com/ai-gateway) key. Configure it in the extension popup, not in source code or build-time environment variables. TypeSafe AI direct is shown as **WIP** and cannot be selected. No key or shared account is bundled.
 
 ## Behavior
 
@@ -61,8 +70,14 @@ bun run build
 bun run build:firefox
 ```
 
-On Kitze's Linux host, use `dev-guard run build -- ...` for build/check jobs and `dev-guard run preview -- bun run dev` for a preview. No background server is needed for unpacked builds.
+Use `bun run dev` for WXT development mode. No background server is needed for unpacked production builds.
+
+The normal checks use synthetic fixtures and need no API key. Optional live smoke test: set `AI_GATEWAY_API_KEY` in your shell environment, then run `bun scripts/smoke-jev.ts`. It sends synthetic inputs only and incurs a small API charge. Never commit `.env` files, API keys, browser profiles, or real browsing data.
 
 Outputs: `.output/chrome-mv3/` and `.output/firefox-mv2/`. `bun run zip` packages Chromium.
 
 Architecture: `lib/page-context.ts` identifies templates, `lib/dom.ts` extracts candidates and applies reversible rules, `lib/jev.ts` implements the evaluation-model v4 contract, `entrypoints/background.ts` owns credentials/cache/actions, `entrypoints/cleaner.content.ts` handles page lifecycle, and `entrypoints/popup/` provides controls. Settings and profiles use independent storage keys to avoid unrelated-tab write loss.
+
+## License
+
+[MIT](LICENSE).
