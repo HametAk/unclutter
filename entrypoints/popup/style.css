@@ -38,6 +38,23 @@ h1 {
 main {
   padding: 0 16px;
 }
+.mode-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+.mode-row label {
+  font-size: 12px;
+  font-weight: 600;
+}
+.mode-row select {
+  margin-left: auto;
+  width: 190px;
+}
+#auto-disclosure {
+  margin: 0 0 14px;
+}
 button,
 input,
 select {

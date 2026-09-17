@@ -1,7 +1,16 @@
 import { z } from "zod";
 
 export const POLICY_VERSION = 1;
-export const categories = ["keep", "ad", "promotion", "newsletter", "social", "uncertain"] as const;
+export const ANALYSIS_VERSION = 2;
+export const categories = [
+  "keep",
+  "ad",
+  "promotion",
+  "newsletter",
+  "social",
+  "cookie",
+  "uncertain",
+] as const;
 export type Category = (typeof categories)[number];
 export const ruleSchema = z.object({
   selector: z.string().min(1).max(400),
@@ -15,6 +24,7 @@ export const profileSchema = z.object({
   origin: z.string(),
   enabled: z.boolean(),
   version: z.number(),
+  analysisVersion: z.number().default(1),
   analyzedAt: z.number(),
   candidateCount: z.number(),
   rules: z.array(ruleSchema).max(60),
@@ -49,7 +59,25 @@ export type PageState = {
   enabled: boolean;
   hiddenCount: number;
 };
-export type Settings = { enabled: boolean; apiKey: string; provider: "vercel" };
+export type Settings = {
+  enabled: boolean;
+  apiKey: string;
+  provider: "vercel";
+  mode: "manual" | "auto";
+};
+export function shouldAutoAnalyze(
+  settings: Settings,
+  profile: Profile | null,
+  attempted: boolean,
+): boolean {
+  return (
+    settings.enabled &&
+    settings.mode === "auto" &&
+    !!settings.apiKey &&
+    !attempted &&
+    (!profile || (profile.enabled && profile.analysisVersion < ANALYSIS_VERSION))
+  );
+}
 export type Reply<T> = { ok: true; data: T } | { ok: false; error: string };
 export function unwrap<T>(reply: Reply<T>): T {
   if (!reply.ok) throw new Error(reply.error);

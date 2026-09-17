@@ -4,6 +4,8 @@ import { evaluate } from "../lib/jev";
 import {
   contextSchema,
   POLICY_VERSION,
+  ANALYSIS_VERSION,
+  shouldAutoAnalyze,
   profileSchema,
   snapshotSchema,
   unwrap,
@@ -20,6 +22,7 @@ const uiMessage = z.discriminatedUnion("type", [
   z.object({ type: z.literal("saveKey"), key: z.string().trim().min(1).max(1000) }),
   z.object({ type: z.literal("removeKey") }),
   z.object({ type: z.literal("global"), enabled: z.boolean() }),
+  z.object({ type: z.literal("mode"), mode: z.enum(["manual", "auto"]) }),
   z.object({ type: z.literal("status"), tabId: z.number().int() }),
   z.object({ type: z.literal("analyze"), tabId: z.number().int() }),
   z.object({ type: z.literal("toggle"), tabId: z.number().int(), enabled: z.boolean() }),
@@ -31,11 +34,14 @@ const uiMessage = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("forget"), tabId: z.number().int() }),
 ]);
-const syncMessage = z.object({
-  type: z.literal("sync"),
-  context: contextSchema,
-  hiddenCount: z.number().int().min(0).max(1200),
-});
+const pageMessage = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("sync"),
+    context: contextSchema,
+    hiddenCount: z.number().int().min(0).max(1200),
+  }),
+  z.object({ type: z.literal("visit"), context: contextSchema }),
+]);
 const profileKey = (key: string) => `profile:${key}`;
 
 export default defineBackground(() => {
@@ -49,11 +55,12 @@ export default defineBackground(() => {
     .setAccessLevel?.({ accessLevel: "TRUSTED_CONTEXTS" })
     .catch(() => undefined);
   const settings = async (): Promise<Settings> => {
-    const data = await browser.storage.local.get(["enabled", "apiKey"]);
+    const data = await browser.storage.local.get(["enabled", "apiKey", "mode"]);
     return {
       enabled: data.enabled !== false,
       apiKey: typeof data.apiKey === "string" ? data.apiKey : "",
       provider: "vercel",
+      mode: data.mode === "auto" ? "auto" : "manual",
     };
   };
   const profile = async (context: PageContext): Promise<Profile | null> => {
@@ -104,7 +111,7 @@ export default defineBackground(() => {
         .map((tab) => refresh(tab.id!).catch(() => undefined)),
     );
   };
-  const analyze = async (tabId: number) => {
+  const analyze = async (tabId: number, automatic = false) => {
     const snapshot = snapshotSchema.parse(await send<Snapshot>(tabId, "snapshot"));
     const existing = jobs.get(snapshot.context.key);
     if (existing) {
@@ -112,15 +119,23 @@ export default defineBackground(() => {
       await refresh(tabId);
       return;
     }
-    tabJobs.add(tabId);
-    tabErrors.delete(tabId);
+    const attemptKey = `auto:${snapshot.context.key}:a${ANALYSIS_VERSION}`;
     const task = (async () => {
       const config = await settings();
+      const before = await profile(snapshot.context);
+      const attempt = (await browser.storage.local.get(attemptKey))[attemptKey];
+      if (automatic && !shouldAutoAnalyze(config, before, !!attempt)) return;
       if (!config.apiKey) throw new Error("Add your Vercel AI Gateway API key first.");
       if (!config.enabled) throw new Error("Enable Unclutter before analyzing.");
-      const before = await profile(snapshot.context);
+      tabJobs.add(tabId);
+      tabErrors.delete(tabId);
+      // Persist BEFORE making a paid request: a failed call or worker restart
+      // must not create a retry loop across navigation or another tab.
+      await browser.storage.local.set({ [attemptKey]: { startedAt: Date.now(), error: null } });
       await badge(tabId);
       const rules = await evaluate(snapshot, config.apiKey);
+      const latestConfig = await settings();
+      if (!latestConfig.enabled || (automatic && latestConfig.mode !== "auto")) return;
       const current = snapshotSchema.parse(await send<Snapshot>(tabId, "snapshot"));
       if (current.url !== snapshot.url || current.context.key !== snapshot.context.key)
         throw new Error("Page changed during analysis. Result discarded.");
@@ -135,11 +150,13 @@ export default defineBackground(() => {
         ...snapshot.context,
         enabled: before?.enabled ?? true,
         version: POLICY_VERSION,
+        analysisVersion: ANALYSIS_VERSION,
         analyzedAt: Date.now(),
         candidateCount: snapshot.candidates.length,
         rules,
       };
       await browser.storage.local.set({ [profileKey(next.key)]: next });
+      await browser.storage.local.remove(attemptKey);
     })();
     jobs.set(snapshot.context.key, task);
     try {
@@ -147,6 +164,7 @@ export default defineBackground(() => {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Analysis failed.";
       tabErrors.set(tabId, message);
+      await browser.storage.local.set({ [attemptKey]: { startedAt: Date.now(), error: message } });
       throw error;
     } finally {
       jobs.delete(snapshot.context.key);
@@ -171,7 +189,7 @@ export default defineBackground(() => {
     const handle = async (): Promise<unknown> => {
       if (sender.id !== browser.runtime.id) throw new Error("Untrusted sender.");
       if (sender.tab) {
-        const message = syncMessage.parse(raw);
+        const message = pageMessage.parse(raw);
         if (
           sender.frameId !== 0 ||
           sender.tab.id === undefined ||
@@ -180,6 +198,10 @@ export default defineBackground(() => {
           !message.context.key.startsWith(`${message.context.origin}|v${POLICY_VERSION}|`)
         )
           throw new Error("Invalid page context.");
+        if (message.type === "visit") {
+          await analyze(sender.tab.id, true);
+          return null;
+        }
         const config = await settings();
         const saved = await profile(message.context);
         const state: PageState = {
@@ -189,14 +211,23 @@ export default defineBackground(() => {
           hiddenCount: message.hiddenCount,
         };
         await badge(sender.tab.id, state, tabErrors.has(sender.tab.id));
-        return { profile: saved, enabled: config.enabled };
+        return {
+          profile: saved,
+          enabled: config.enabled,
+          autoEnabled: config.mode === "auto" && !!config.apiKey,
+        };
       }
       if (sender.url !== browser.runtime.getURL("/popup.html"))
         throw new Error("Popup access required.");
       const message = uiMessage.parse(raw);
       if (message.type === "settings") {
         const config = await settings();
-        return { enabled: config.enabled, hasKey: !!config.apiKey, provider: config.provider };
+        return {
+          enabled: config.enabled,
+          hasKey: !!config.apiKey,
+          provider: config.provider,
+          mode: config.mode,
+        };
       }
       if (message.type === "saveKey") {
         await browser.storage.local.set({ apiKey: message.key });
@@ -211,12 +242,21 @@ export default defineBackground(() => {
         await broadcast();
         return null;
       }
+      if (message.type === "mode") {
+        await browser.storage.local.set({ mode: message.mode });
+        await broadcast();
+        return null;
+      }
       if (message.type === "status") {
         const state = await send<PageState>(message.tabId, "state");
+        const attemptKey = `auto:${state.context.key}:a${ANALYSIS_VERSION}`;
+        const attempt = (await browser.storage.local.get(attemptKey))[attemptKey] as
+          | { error?: string | null }
+          | undefined;
         return {
           ...state,
           busy: tabJobs.has(message.tabId) || jobs.has(state.context.key),
-          error: tabErrors.get(message.tabId) ?? null,
+          error: tabErrors.get(message.tabId) ?? attempt?.error ?? null,
         };
       }
       if (message.type === "analyze") {

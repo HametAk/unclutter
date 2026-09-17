@@ -16,6 +16,18 @@
       ></label>
     </header>
     <main>
+      <div class="mode-row">
+        <label for="analysis-mode">Analysis</label
+        ><select id="analysis-mode">
+          <option value="manual">Manual</option>
+          <option value="auto">On page visit</option>
+        </select>
+      </div>
+      <p id="auto-disclosure" class="disclosure" hidden>
+        On page visit automatically sends element snippets to Vercel / TypeSafe AI for new
+        templates. Snippets may contain personal data. API charges apply. Cached templates are
+        reused.
+      </p>
       <section id="page" class="page-card">
         <div class="site-line">
           <strong id="host">Current page</strong><span id="status" class="badge">Loading</span>
@@ -67,7 +79,9 @@
         </form>
       </details>
     </main>
-    <footer><span>Jev</span><span>Local rules · No background AI calls</span></footer>
+    <footer>
+      <span>Jev</span><span id="mode-hint">Manual analysis · Cached rules apply automatically</span>
+    </footer>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

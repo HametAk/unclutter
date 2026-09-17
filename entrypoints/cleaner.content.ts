@@ -1,7 +1,7 @@
 import { browser } from "wxt/browser";
 import { collectCandidates, createCleaner } from "../lib/dom";
 import { pageContext } from "../lib/page-context";
-import { unwrap, type PageState, type Profile, type Reply } from "../lib/model";
+import { ANALYSIS_VERSION, unwrap, type PageState, type Profile, type Reply } from "../lib/model";
 
 export default defineContentScript({
   matches: ["http://*/*", "https://*/*"],
@@ -17,6 +17,41 @@ export default defineContentScript({
     let revision = 0;
     let timeout: number | undefined;
     let lastUrl = location.href;
+    let autoTimer: number | undefined;
+    let autoPendingKey: string | null = null;
+    const autoRequested = new Set<string>();
+    let autoEnabled = false;
+    const requestAuto = () => {
+      if (
+        !autoEnabled ||
+        !state.enabled ||
+        document.visibilityState !== "visible" ||
+        state.profile?.enabled === false ||
+        (state.profile && state.profile.analysisVersion >= ANALYSIS_VERSION)
+      )
+        return;
+      const key = state.context.key;
+      if (autoRequested.has(key) || autoPendingKey === key) return;
+      clearTimeout(autoTimer);
+      autoPendingKey = key;
+      // Let client-rendered banners/ads mount; DOM mutation never schedules
+      // additional paid calls. The background also persists attempt deduplication.
+      autoTimer = ctx.setTimeout(() => {
+        autoPendingKey = null;
+        if (
+          ctx.isInvalid ||
+          !autoEnabled ||
+          !state.enabled ||
+          document.visibilityState !== "visible" ||
+          pageContext(document, location.href).key !== key
+        )
+          return;
+        autoRequested.add(key);
+        void browser.runtime
+          .sendMessage({ type: "visit", context: state.context })
+          .catch(() => undefined);
+      }, 1500);
+    };
     const sync = async () => {
       const version = ++revision;
       const context = pageContext(document, location.href);
@@ -30,15 +65,17 @@ export default defineContentScript({
           type: "sync",
           context,
           hiddenCount: state.hiddenCount,
-        })) as Reply<{ profile: Profile | null; enabled: boolean }>,
+        })) as Reply<{ profile: Profile | null; enabled: boolean; autoEnabled: boolean }>,
       );
       if (version !== revision || ctx.isInvalid) return state;
+      autoEnabled = result.autoEnabled;
       state = { context, ...result, hiddenCount: 0 };
       state.hiddenCount = cleaner.apply(
         state.enabled && state.profile?.enabled ? state.profile.rules : [],
       );
       // Update badge with actual match count, not count of stored selectors.
       await browser.runtime.sendMessage({ type: "sync", context, hiddenCount: state.hiddenCount });
+      requestAuto();
       return state;
     };
     const safelySync = () =>
@@ -54,9 +91,14 @@ export default defineContentScript({
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ["class", "id", "data-testid", "data-component", "content"],
+      attributeFilter: ["class", "id", "data-testid", "data-component", "content", "style"],
+    });
+    ctx.addEventListener(document, "visibilitychange", () => {
+      if (document.visibilityState === "visible") safelySync();
     });
     ctx.addEventListener(window, "wxt:locationchange", () => {
+      clearTimeout(autoTimer);
+      autoPendingKey = null;
       revision++;
       cleaner.restore();
       state.hiddenCount = 0;
@@ -88,6 +130,7 @@ export default defineContentScript({
     ctx.onInvalidated(() => {
       revision++;
       clearTimeout(timeout);
+      clearTimeout(autoTimer);
       observer.disconnect();
       cleaner.restore();
       browser.runtime.onMessage.removeListener(listener);

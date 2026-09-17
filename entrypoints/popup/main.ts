@@ -1,5 +1,5 @@
 import { browser } from "wxt/browser";
-import { unwrap, type PageState, type Reply } from "../../lib/model";
+import { ANALYSIS_VERSION, unwrap, type PageState, type Reply } from "../../lib/model";
 import "./style.css";
 
 const get = <T extends HTMLElement>(id: string) => {
@@ -10,6 +10,7 @@ const get = <T extends HTMLElement>(id: string) => {
 const analyze = get<HTMLButtonElement>("analyze");
 const toggle = get<HTMLButtonElement>("toggle");
 const global = get<HTMLInputElement>("global");
+const mode = get<HTMLSelectElement>("analysis-mode");
 const errorBox = get("error");
 let tabId: number | undefined;
 let hasKey = false;
@@ -38,7 +39,12 @@ function render() {
   toggle.textContent = current?.profile?.enabled ? "Pause" : "Resume";
   get("key-status").textContent = hasKey ? "Vercel · Key saved" : "API key required";
   get("remove-key").hidden = !hasKey;
-  get("disclosure").hidden = !current;
+  get("disclosure").hidden = !current || mode.value === "auto";
+  get("auto-disclosure").hidden = mode.value !== "auto";
+  get("mode-hint").textContent =
+    mode.value === "auto"
+      ? "On page visit · Cached templates reused"
+      : "Manual analysis · Cached rules apply automatically";
   if (!current) return;
   const { profile, context, hiddenCount } = current;
   get("host").textContent = new URL(context.origin).hostname;
@@ -54,7 +60,9 @@ function render() {
     : paused
       ? "Paused"
       : profile
-        ? "Saved template"
+        ? profile.analysisVersion < ANALYSIS_VERSION
+          ? "Update available"
+          : "Saved template"
         : "Not analyzed";
   status.className = `badge ${busy ? "busy" : profile && !paused ? "active" : ""}`;
   get("rules-section").hidden = !profile;
@@ -93,9 +101,12 @@ function render() {
   }
 }
 async function load() {
-  const config = await request<{ enabled: boolean; hasKey: boolean }>({ type: "settings" });
+  const config = await request<{ enabled: boolean; hasKey: boolean; mode: "manual" | "auto" }>({
+    type: "settings",
+  });
   hasKey = config.hasKey;
   global.checked = config.enabled;
+  mode.value = config.mode;
   if (tabId !== undefined) {
     try {
       current = await request({ type: "status", tabId });
@@ -108,7 +119,17 @@ async function load() {
   }
   render();
   clearTimeout(poll);
-  if (current?.busy) poll = setTimeout(() => void load().catch(error), 900);
+  if (
+    current?.busy ||
+    (current &&
+      !current.error &&
+      config.mode === "auto" &&
+      config.enabled &&
+      hasKey &&
+      current.profile?.enabled !== false &&
+      (!current.profile || current.profile.analysisVersion < ANALYSIS_VERSION))
+  )
+    poll = setTimeout(() => void load().catch(error), 900);
 }
 async function act(message: object) {
   if (working) return;
@@ -133,6 +154,7 @@ toggle.addEventListener(
   () => void act({ type: "toggle", tabId, enabled: !current?.profile?.enabled }),
 );
 global.addEventListener("change", () => void act({ type: "global", enabled: global.checked }));
+mode.addEventListener("change", () => void act({ type: "mode", mode: mode.value }));
 get("forget").addEventListener("click", () => void act({ type: "forget", tabId }));
 get("remove-key").addEventListener("click", () => void act({ type: "removeKey" }));
 get("key-form").addEventListener("submit", (event) => {

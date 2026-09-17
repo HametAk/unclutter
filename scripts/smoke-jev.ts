@@ -26,6 +26,24 @@ const snapshot: Snapshot = {
       position: "static",
       count: 1,
     },
+    {
+      id: "e2",
+      selector: 'div[id^="sp_message_container_"]',
+      tag: "div",
+      signals: "Cookie consent overlay sp_message_container_123456",
+      text: "We value your privacy. Accept all cookies or manage your preferences.",
+      position: "fixed",
+      count: 1,
+    },
+    {
+      id: "e3",
+      selector: 'div[data-testid="ad-unit"]',
+      tag: "div",
+      signals: "ad-unit ad-slot reserved advertisement space min-height 300px",
+      text: "",
+      position: "static",
+      count: 1,
+    },
   ],
 };
 const start = performance.now();
@@ -34,6 +52,14 @@ if (!rules.some((rule) => rule.selector === "div.ad-banner"))
   throw new Error("Synthetic ad was not selected.");
 if (rules.some((rule) => rule.selector === "aside.article-context"))
   throw new Error("Editorial context was incorrectly selected.");
+if (
+  !rules.some(
+    (rule) => rule.category === "cookie" && rule.selector === 'div[id^="sp_message_container_"]',
+  )
+)
+  throw new Error("Cookie dialog was not selected.");
+if (!rules.some((rule) => rule.selector === 'div[data-testid="ad-unit"]'))
+  throw new Error("Empty ad wrapper was not selected.");
 console.log(
-  `PASS: live Jev selected synthetic ad and kept editorial context (${Math.round(performance.now() - start)} ms).`,
+  `PASS: live Jev selected ad, cookie dialog and empty ad wrapper; kept editorial context (${Math.round(performance.now() - start)} ms).`,
 );

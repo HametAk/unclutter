@@ -67,14 +67,14 @@ test("generic short section routes are not incorrectly merged", () => {
   );
 });
 
-test("candidates target stable clutter, never main content, forms, cookie consent or paywalls", () => {
+test("candidates include cookie banners but protect main content, ordinary forms and paywalls", () => {
   const d = doc(
     '<main class="promo-main"><h1>Story</h1></main><div class="ad-slot">Ad contact hello@example.com</div><div class="newsletter"><form><input value="secret" /></form></div><div class="cookie-banner">Accept all cookies</div><div class="paywall-overlay">Subscribe to read</div><div class="promo-modal">Try our summer sale</div>',
   );
   const candidates = collectCandidates(d);
   assert.deepEqual(
     candidates.map((c) => c.selector),
-    ["div.ad-slot", "div.promo-modal"],
+    ["div.ad-slot", "div.cookie-banner", "div.promo-modal"],
   );
   assert.ok(!JSON.stringify(candidates).includes("hello@example.com"));
   assert.ok(!JSON.stringify(candidates).includes("secret"));
@@ -105,7 +105,8 @@ test("hiding is reversible, catches late inserts and refuses newly protected mat
   late.remove();
   cleaner.apply(rules);
   cleaner.restore();
-  assert.equal(ad.getAttribute("style"), "color: red");
+  assert.equal((ad as HTMLElement).style.color, "red");
+  assert.equal((ad as HTMLElement).style.display, "");
   assert.doesNotMatch(d.documentElement.outerHTML, /data-unclutter-/);
 });
 
