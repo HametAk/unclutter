@@ -248,7 +248,8 @@ form > label {
   color: #586253;
 }
 select,
-input[type="password"] {
+input[type="password"],
+input[type="text"] {
   width: 100%;
   border: 1px solid #d9e0d4;
   border-radius: 7px;
@@ -359,7 +360,8 @@ footer > span:first-child {
     border-color: #354032;
   }
   select,
-  input[type="password"] {
+  input[type="password"],
+  input[type="text"] {
     background: #222a23;
     color: #e0e6db;
     border-color: #45513f;

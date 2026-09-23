@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { categories, type Candidate, type Rule, type Snapshot } from "./model";
 import type { Provider } from "./providers";
+import { DEFAULT_OLLAMA_BASE, evaluateSemif } from "./semif";
 
 export const ENDPOINT = "https://ai-gateway.vercel.sh/v4/ai/evaluation-model";
 export const TYPESAFE_ENDPOINT = "https://api.typesafe.ai/v1/systemone";
@@ -101,7 +102,9 @@ export async function evaluate(
   snapshot: Snapshot,
   key: string,
   provider: Provider = "vercel",
+  ollamaBase = DEFAULT_OLLAMA_BASE,
 ): Promise<Rule[]> {
+  if (provider === "ollama") return evaluateSemif(snapshot, key, ollamaBase);
   if (!snapshot.candidates.length) return [];
   const { url, init } = evaluationCall(snapshot, key, provider);
   const response = await fetch(url, init);

@@ -3,7 +3,7 @@ import { defineConfig } from "wxt";
 export default defineConfig({
   manifest: ({ browser }) => ({
     name: "Unclutter",
-    description: "Hide ads and promotions with reusable, AI-reviewed page-template rules.",
+    description: "Hide ads and promotions with reusable page rules. Local SemIf via Ollama, or hosted Jev.",
     permissions: ["storage", "activeTab"],
     host_permissions: ["http://*/*", "https://*/*"],
     action: { default_title: "Unclutter" },
@@ -12,7 +12,7 @@ export default defineConfig({
       ? {
           browser_specific_settings: {
             gecko: {
-              id: "unclutter@kitze.io",
+              id: "unclutter@hametak.github.io",
               strict_min_version: "140.0",
               data_collection_permissions: { required: ["websiteContent", "authenticationInfo"] },
             },

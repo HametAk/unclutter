@@ -81,6 +81,7 @@ test("stored provider resolution defaults missing/unknown values to Gateway", ()
   for (const input of [undefined, null, "unknown", "", {}, 1, "vercel"])
     assert.equal(resolveProvider(input), "vercel");
   assert.equal(resolveProvider("typesafe"), "typesafe");
+  assert.equal(resolveProvider("ollama"), "ollama");
 });
 
 test("TypeSafe response ignores top-level metadata and enforces BOTH supplied confidence gates", () => {
@@ -158,6 +159,18 @@ test("smoke credentials support direct aliases and reject mixed provider familie
   assert.throws(
     () => smokeCredentials({ JEV_KEY: "first-test-value", TYPESAFE_API_KEY: "second-test-value" }),
     /differ/,
+  );
+  assert.deepEqual(
+    smokeCredentials({ OLLAMA_MODEL: " qwen3.5:4b ", OLLAMA_HOST: "http://127.0.0.1:11434" }),
+    {
+      provider: "ollama",
+      key: "qwen3.5:4b",
+      ollamaBase: "http://127.0.0.1:11434",
+    },
+  );
+  assert.throws(
+    () => smokeCredentials({ OLLAMA_MODEL: "qwen3.5:4b", JEV_KEY: "synthetic-test-key" }),
+    /only one provider/,
   );
   assert.throws(() => smokeCredentials({}), /Set JEV_KEY/);
 });

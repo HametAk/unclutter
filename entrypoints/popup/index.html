@@ -59,27 +59,55 @@
           ><select id="provider">
             <option value="vercel">Vercel AI Gateway</option>
             <option value="typesafe">TypeSafe AI</option>
+            <option value="ollama">Ollama (SemIf)</option>
           </select>
-          <label for="api-key">API key</label>
-          <div class="key-row">
+          <div id="cloud-fields">
+            <label for="api-key">API key</label>
+            <div class="key-row">
+              <input
+                id="api-key"
+                type="password"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="Paste Vercel AI Gateway key"
+              /><button type="submit" class="secondary">Save</button>
+            </div>
+            <p class="disclosure">
+              Stored on this device in extension storage, not encrypted or synced. Never sent to
+              websites.
+            </p>
+          </div>
+          <div id="ollama-fields" hidden>
+            <label for="ollama-model">Model</label>
             <input
-              id="api-key"
-              type="password"
+              id="ollama-model"
+              type="text"
               autocomplete="off"
               spellcheck="false"
-              placeholder="Paste Vercel AI Gateway key"
-            /><button type="submit" class="secondary">Save</button>
+              placeholder="qwen3.5:4b"
+            />
+            <label for="ollama-base">Host</label>
+            <div class="key-row">
+              <input
+                id="ollama-base"
+                type="text"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="http://127.0.0.1:11434"
+              /><button id="save-ollama" type="button" class="secondary">Save</button>
+            </div>
+            <p class="disclosure">
+              SemIf letter-logit readout on this Ollama host. Snippets stay there. Scores are
+              uncalibrated option probabilities, not Jev confidence.
+            </p>
           </div>
-          <p class="disclosure">
-            Stored on this device in extension storage, not encrypted or synced. Never sent to
-            websites.
-          </p>
           <button id="remove-key" type="button" class="text-button" hidden>Remove saved key</button>
         </form>
       </details>
     </main>
     <footer>
-      <span>Jev</span><span id="mode-hint">Manual analysis · Cached rules apply automatically</span>
+      <span id="engine">Jev</span
+      ><span id="mode-hint">Manual analysis · Cached rules apply automatically</span>
     </footer>
     <script type="module" src="./main.ts"></script>
   </body>

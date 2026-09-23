@@ -1,5 +1,6 @@
 import { browser } from "wxt/browser";
 import { ANALYSIS_VERSION, unwrap, type PageState, type Reply } from "../../lib/model";
+import { DEFAULT_OLLAMA_BASE } from "../../lib/semif";
 import {
   providerLabel,
   providerKeyLabel,
@@ -23,6 +24,8 @@ let tabId: number | undefined;
 let hasKey = false;
 let working = false;
 let savedProvider: Provider = "vercel";
+let savedModel = "";
+let ollamaDirty = false;
 let current: (PageState & { busy: boolean; error: string | null }) | null = null;
 let poll: ReturnType<typeof setTimeout> | undefined;
 
@@ -46,16 +49,28 @@ function render() {
   toggle.disabled = !!busy || !global.checked;
   toggle.textContent = current?.profile?.enabled ? "Pause" : "Resume";
   const selectedProvider = resolveProvider(provider.value);
+  const local = selectedProvider === "ollama";
   provider.disabled = working;
+  get("cloud-fields").hidden = local;
+  get("ollama-fields").hidden = !local;
   get<HTMLInputElement>("api-key").placeholder = `Paste ${providerKeyLabel(selectedProvider)} key`;
   get("key-status").textContent = hasKey
-    ? `${selectedProvider === "typesafe" ? "TypeSafe" : "Vercel"} · Key saved`
-    : "API key required";
-  get("disclosure").textContent =
-    `Analyze sends up to 60 element descriptions to ${providerLabel(selectedProvider)}. Main article text and form values are excluded; snippets may still contain personal data.`;
-  get("auto-disclosure").textContent =
-    `On page visit automatically sends element snippets to ${providerLabel(selectedProvider)} for new templates. Snippets may contain personal data. API charges apply. Cached templates are reused.`;
-  get("remove-key").hidden = !hasKey;
+    ? local
+      ? `Ollama · ${savedModel}`
+      : `${selectedProvider === "typesafe" ? "TypeSafe" : "Vercel"} · Key saved`
+    : local
+      ? "Model required"
+      : "API key required";
+  get("engine").textContent = local ? "SemIf" : "Jev";
+  get("disclosure").textContent = local
+    ? "Analyze sends up to 60 element descriptions to your Ollama host. Main article text and form values are excluded; snippets may still contain personal data."
+    : `Analyze sends up to 60 element descriptions to ${providerLabel(selectedProvider)}. Main article text and form values are excluded; snippets may still contain personal data.`;
+  get("auto-disclosure").textContent = local
+    ? "On page visit sends element snippets to your Ollama host for new templates. Snippets may contain personal data. Cached templates are reused."
+    : `On page visit automatically sends element snippets to ${providerLabel(selectedProvider)} for new templates. Snippets may contain personal data. API charges apply. Cached templates are reused.`;
+  const remove = get<HTMLButtonElement>("remove-key");
+  remove.hidden = !hasKey;
+  remove.textContent = local ? "Remove saved model" : "Remove saved key";
   get("disclosure").hidden = !current || mode.value === "auto";
   get("auto-disclosure").hidden = mode.value !== "auto";
   get("mode-hint").textContent =
@@ -123,6 +138,8 @@ async function load() {
     hasKey: boolean;
     mode: "manual" | "auto";
     provider: Provider;
+    ollamaModel: string;
+    ollamaBase: string;
   }>({
     type: "settings",
   });
@@ -130,7 +147,12 @@ async function load() {
   global.checked = config.enabled;
   mode.value = config.mode;
   savedProvider = resolveProvider(config.provider);
+  savedModel = config.ollamaModel;
   provider.value = savedProvider;
+  if (!ollamaDirty) {
+    get<HTMLInputElement>("ollama-model").value = config.ollamaModel;
+    get<HTMLInputElement>("ollama-base").value = config.ollamaBase || DEFAULT_OLLAMA_BASE;
+  }
   if (tabId !== undefined) {
     try {
       current = await request({ type: "status", tabId });
@@ -186,8 +208,30 @@ provider.addEventListener(
 );
 get("forget").addEventListener("click", () => void act({ type: "forget", tabId }));
 get("remove-key").addEventListener("click", () => void act({ type: "removeKey" }));
+for (const id of ["ollama-model", "ollama-base"])
+  get<HTMLInputElement>(id).addEventListener("input", () => {
+    ollamaDirty = true;
+  });
+get("save-ollama").addEventListener("click", () => {
+  const model = get<HTMLInputElement>("ollama-model").value.trim();
+  const base = get<HTMLInputElement>("ollama-base").value.trim();
+  if (!model) {
+    error(new Error("Enter an Ollama model name."));
+    return;
+  }
+  void (async () => {
+    await act({ type: "saveOllama", model, base: base || DEFAULT_OLLAMA_BASE });
+    if (errorBox.hidden) {
+      ollamaDirty = false;
+      get<HTMLDetailsElement>("connection").open = false;
+      get("notice").textContent = "Ollama model saved. Analyze a page to verify SemIf readout.";
+      get("notice").hidden = false;
+    }
+  })();
+});
 get("key-form").addEventListener("submit", (event) => {
   event.preventDefault();
+  if (resolveProvider(provider.value) === "ollama") return;
   const input = get<HTMLInputElement>("api-key");
   const key = input.value.trim();
   if (!key) {

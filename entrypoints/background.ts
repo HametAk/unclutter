@@ -2,10 +2,12 @@ import { browser } from "wxt/browser";
 import { z } from "zod";
 import { evaluate } from "../lib/jev";
 import { providers, providerKeyLabel, resolveProvider } from "../lib/providers";
+import { normalizeOllamaBase } from "../lib/semif";
 import {
   contextSchema,
   POLICY_VERSION,
   ANALYSIS_VERSION,
+  providerConfigured,
   shouldAutoAnalyze,
   profileSchema,
   snapshotSchema,
@@ -26,6 +28,11 @@ const uiMessage = z.discriminatedUnion("type", [
     provider: z.enum(providers),
   }),
   z.object({ type: z.literal("provider"), provider: z.enum(providers) }),
+  z.object({
+    type: z.literal("saveOllama"),
+    model: z.string().trim().min(1).max(200),
+    base: z.string().trim().min(1).max(300),
+  }),
   z.object({ type: z.literal("removeKey") }),
   z.object({ type: z.literal("global"), enabled: z.boolean() }),
   z.object({ type: z.literal("mode"), mode: z.enum(["manual", "auto"]) }),
@@ -61,12 +68,21 @@ export default defineBackground(() => {
     .setAccessLevel?.({ accessLevel: "TRUSTED_CONTEXTS" })
     .catch(() => undefined);
   const settings = async (): Promise<Settings> => {
-    const data = await browser.storage.local.get(["enabled", "apiKey", "mode", "provider"]);
+    const data = await browser.storage.local.get([
+      "enabled",
+      "apiKey",
+      "mode",
+      "provider",
+      "ollamaModel",
+      "ollamaBase",
+    ]);
     return {
       enabled: data.enabled !== false,
       apiKey: typeof data.apiKey === "string" ? data.apiKey : "",
       provider: resolveProvider(data.provider),
       mode: data.mode === "auto" ? "auto" : "manual",
+      ollamaModel: typeof data.ollamaModel === "string" ? data.ollamaModel : "",
+      ollamaBase: typeof data.ollamaBase === "string" ? data.ollamaBase : "",
     };
   };
   const profile = async (context: PageContext): Promise<Profile | null> => {
@@ -131,8 +147,12 @@ export default defineBackground(() => {
       const before = await profile(snapshot.context);
       const attempt = (await browser.storage.local.get(attemptKey))[attemptKey];
       if (automatic && !shouldAutoAnalyze(config, before, !!attempt)) return;
-      if (!config.apiKey)
-        throw new Error(`Add your ${providerKeyLabel(config.provider)} API key first.`);
+      if (!providerConfigured(config))
+        throw new Error(
+          config.provider === "ollama"
+            ? "Set an Ollama model first."
+            : `Add your ${providerKeyLabel(config.provider)} API key first.`,
+        );
       if (!config.enabled) throw new Error("Enable Unclutter before analyzing.");
       tabJobs.add(tabId);
       tabErrors.delete(tabId);
@@ -140,7 +160,12 @@ export default defineBackground(() => {
       // must not create a retry loop across navigation or another tab.
       await browser.storage.local.set({ [attemptKey]: { startedAt: Date.now(), error: null } });
       await badge(tabId);
-      const rules = await evaluate(snapshot, config.apiKey, config.provider);
+      const rules = await evaluate(
+        snapshot,
+        config.provider === "ollama" ? config.ollamaModel : config.apiKey,
+        config.provider,
+        config.ollamaBase,
+      );
       const latestConfig = await settings();
       if (!latestConfig.enabled || (automatic && latestConfig.mode !== "auto")) return;
       const current = snapshotSchema.parse(await send<Snapshot>(tabId, "snapshot"));
@@ -221,7 +246,7 @@ export default defineBackground(() => {
         return {
           profile: saved,
           enabled: config.enabled,
-          autoEnabled: config.mode === "auto" && !!config.apiKey,
+          autoEnabled: config.mode === "auto" && providerConfigured(config),
         };
       }
       if (sender.url !== browser.runtime.getURL("/popup.html"))
@@ -231,10 +256,22 @@ export default defineBackground(() => {
         const config = await settings();
         return {
           enabled: config.enabled,
-          hasKey: !!config.apiKey,
+          hasKey: providerConfigured(config),
           provider: config.provider,
           mode: config.mode,
+          ollamaModel: config.ollamaModel,
+          ollamaBase: config.ollamaBase,
         };
+      }
+      if (message.type === "saveOllama") {
+        if (!/^[\w./:-]+$/.test(message.model))
+          throw new Error("Ollama model names use letters, numbers, and . _ : / -.");
+        await browser.storage.local.set({
+          ollamaModel: message.model,
+          ollamaBase: normalizeOllamaBase(message.base),
+          provider: "ollama",
+        });
+        return null;
       }
       if (message.type === "saveKey") {
         await browser.storage.local.set({ apiKey: message.key, provider: message.provider });
@@ -245,7 +282,8 @@ export default defineBackground(() => {
         return null;
       }
       if (message.type === "removeKey") {
-        await browser.storage.local.remove("apiKey");
+        const config = await settings();
+        await browser.storage.local.remove(config.provider === "ollama" ? "ollamaModel" : "apiKey");
         return null;
       }
       if (message.type === "global") {
